@@ -3,7 +3,7 @@ package Config::INI::Simple;
 use strict;
 use warnings;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 sub new {
 	my $proto = shift;
@@ -100,7 +100,19 @@ sub write {
 	my $used = {};
 
 	foreach my $line (@lines) {
-		if ($line =~ /\s*\[(.*?)\]\s*/) {
+		if ($line =~ /^\s*\[(.*?)\]\s*$/) { #new block found
+		
+			# Add new config variables for the previous block
+			if ($self->{__append__} == 1) {
+				foreach my $lab (keys %{$self->{$block}}) {
+				    if (!exists $used->{$block}->{$lab}) {
+					print "Adding $lab=$self->{$block}->{$lab} to INI\n";
+					push (@new, "$lab=$self->{$block}->{$lab}");
+					$used->{$block}->{$lab} = 1;
+				    }
+				}
+			}			
+		
 			$block = $1;
 			$line =~ s/^\s*//g;
 			$line =~ s/\s*$//g;
@@ -159,6 +171,25 @@ sub write {
 	close (WRITE);
 
 	return 1;
+}
+
+sub blocks {
+	my ($self) = @_;
+	my (@theBlocks) = keys(%{$self});
+	my ($i) = 1;
+	my ($s) = "";
+
+	foreach $s ("__file__", "__default__", "__eol__", "__append__") {
+		$i = 1;
+		while ($i <= $#theBlocks) {
+			if ($s eq $theBlocks[$i-1]) {
+	      			splice(@theBlocks, $i-1, 1);
+			}
+			$i++;
+		}
+	}
+
+	return(@theBlocks);
 }
 
 1;
@@ -261,16 +292,20 @@ memory.
 
 =head1 CHANGES
 
+  Version 0.02
+  - Uploaded a version of the module that's been modified by some
+    other Perl hackers.
+
   Version 0.01
   - Initial release.
 
 =head1 AUTHOR
 
-C. J. Kirsle <kirsle -at- rainbowboi.com>
+C. J. Kirsle <kirsle -at- cuvou.net>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2006 by A. U. Thor
+Copyright (C) 2006 by C. J. Kirsle
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.7 or,
