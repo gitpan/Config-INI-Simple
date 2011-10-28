@@ -1,315 +1,121 @@
 package Config::INI::Simple;
-
+BEGIN {
+	$Config::INI::Simple::VERSION = '1.00';
+}
 use strict;
 use warnings;
-
-our $VERSION = '0.02';
+use File::Slurp;
 
 sub new {
-	my $proto = shift;
-	my $class = ref($proto) || $proto || 'Config::INI::Simple';
-
-	my $self = {
-		__file__    => undef,
-		__default__ => 'default',
-		__eol__     => "\n",
-		__append__  => 1,
-		@_,
-	};
-
-	bless ($self,$class);
+	my ($pkg, $path) = @_;
+	die unless defined($pkg);
+	$path = "" unless defined($path);
+	my @cont;
+	@cont = read_file($path) if (-e $path);
+	my $self = {};
+	my $sec = "_";
+	for (@cont) {
+		$sec = $1, next if(/^\[([\w\._\-]+)\]\s*$/);
+		$self->{$sec}->{$1} = $2 if(/^([\w\.\/:_\-]+)=(.*?)\s*$/);
+	}
+	undef(@cont);
+	bless($self, $pkg);
 	return $self;
 }
 
-sub reset {
-	my ($self) = @_;
-
-	$self = {
-		__file__    => $self->{__file__},
-		__default__ => $self->{__default__},
-		__eol__     => $self->{__eol__},
-		__append__  => $self->{__append__},
-	};
-}
-
-sub read {
-	my ($self,$file) = @_;
-
-	if (!defined $file) {
-		$file = $self->{__file__};
-		return unless defined $file;
-	}
-
-	return unless -e $file;
-
-	$self->{__file__} = $file;
-
-	open (FILE, $file);
-	my @lines = <FILE>;
-	close (FILE);
-	chomp @lines;
-
-	my $data = {};
-	my $block = $self->{__default__} || 'default';
-
-	foreach my $line (@lines) {
-		$line =~ s/\r//g;
-		$line =~ s/\n//g;
-		if ($line =~ /\s*\[(.*?)\]\s*/) {
-			$block = $1;
-			next;
-		}
-
-		next if $line =~ /^\s*\;/;
-		next if $line =~ /^\s*\#/;
-
-		next if length $line == 0;
-		my ($what,$is) = split(/=/, $line, 2);
-		$what =~ s/^\s*//g;
-		$what =~ s/\s*$//g;
-		$is =~ s/^\s*//g;
-		$is =~ s/\s*$//g;
-
-		$data->{$block}->{$what} = $is;
-	}
-
-	foreach my $block (keys %{$data}) {
-		$self->{$block} = $data->{$block};
-	}
-
-	return 1;
+sub __push_contents__ {
+	my ($href, $aref) = @_;
+	push @$aref, $_ . "=" . $href->{$_} . "\n" for(keys %$href);
+	push @$aref, "\n";
 }
 
 sub write {
-	my ($self,$file) = @_;
-
-	if (!defined $file) {
-		$file = $self->{__file__};
-		return unless defined $file;
-	}
-
-	return unless -e $file;
-
-	open (FILE, $file);
-	my @lines = <FILE>;
-	close (FILE);
-	chomp @lines;
-
-	my $block = $self->{__default__} || 'default';
-	my @new = ();
-	my $used = {};
-
-	foreach my $line (@lines) {
-		if ($line =~ /^\s*\[(.*?)\]\s*$/) { #new block found
-		
-			# Add new config variables for the previous block
-			if ($self->{__append__} == 1) {
-				foreach my $lab (keys %{$self->{$block}}) {
-				    if (!exists $used->{$block}->{$lab}) {
-					print "Adding $lab=$self->{$block}->{$lab} to INI\n";
-					push (@new, "$lab=$self->{$block}->{$lab}");
-					$used->{$block}->{$lab} = 1;
-				    }
-				}
-			}			
-		
-			$block = $1;
-			$line =~ s/^\s*//g;
-			$line =~ s/\s*$//g;
-			push (@new, $line);
-			next;
+	my ($self, $path) = @_;
+	die "need path" unless defined $path;
+	my @out;
+	__push_contents__($self->{_}, \@out) if(defined($self->{_}));
+	for(keys %$self) {
+		if($_ ne "_") {
+			push @out, "[" . $_ . "]\n";
+			__push_contents__($self->{$_}, \@out);
 		}
-
-		if ($line =~ /^\s*\;/ || $line =~ /^\s*\#/) {
-			push (@new, $line);
-			next;
-		}
-
-		if (length $line == 0) {
-			push (@new, '');
-			next;
-		}
-
-		my ($what,$is) = split(/=/, $line, 2);
-		$what =~ s/^\s*//g;
-		$what =~ s/\s*$//g;
-		$is =~ s/^\s*//g;
-		$is =~ s/\s*$//g;
-
-		if (exists $self->{$block}->{$what}) {
-			$line = join ('=', $what, $self->{$block}->{$what});
-			$used->{$block}->{$what} = 1;
-		}
-
-		push (@new, $line);
-	}
-
-	# Add new config variables?
-	if ($self->{__append__} == 1) {
-		foreach my $key (keys %{$self}) {
-			next if $key =~ /^__.*?__$/i;
-			print "Checking key $key (ref = " . ref($key) . ")\n";
-
-			if (!exists $used->{$key}) {
-				print "Block doesn't exist!\n";
-				push (@new, "");
-				push (@new, "[$key]");
-			}
-
-			foreach my $lab (keys %{$self->{$key}}) {
-				if (!exists $used->{$key}->{$lab}) {
-					print "Adding $lab=$self->{$key}->{$lab} to INI\n";
-					push (@new, "$lab=$self->{$key}->{$lab}");
-				}
-			}
-		}
-	}
-
-	my $eol = $self->{__eol__} || "\r\n";
-	open (WRITE, ">$file");
-	print WRITE join ($eol, @new);
-	close (WRITE);
-
-	return 1;
-}
-
-sub blocks {
-	my ($self) = @_;
-	my (@theBlocks) = keys(%{$self});
-	my ($i) = 1;
-	my ($s) = "";
-
-	foreach $s ("__file__", "__default__", "__eol__", "__append__") {
-		$i = 1;
-		while ($i <= $#theBlocks) {
-			if ($s eq $theBlocks[$i-1]) {
-	      			splice(@theBlocks, $i-1, 1);
-			}
-			$i++;
-		}
-	}
-
-	return(@theBlocks);
+	} 
+	write_file $path, \@out;
 }
 
 1;
-__END__
+
+=pod
 
 =head1 NAME
 
-Config::INI::Simple - Simple reading and writing from an INI file--with preserved
-comments, too!
+Config::INI::Simple - provides quick access to the contents of .ini files
+
+Only dependency is File::Slurp.
 
 =head1 SYNOPSIS
 
-  # in your INI file
-  ; The name of the server block to use
-  ; Use one of the blocks below.
-  server = Server01
+--------------- INI ---------------
 
-  ; All server blocks need a host and port.
-  ; These should be under each block.
-  [Server01]
-  host=foo.bar.com
-  port=7775
+test=blah
 
-  [Server02]
-  host=foobar.net
-  port=2235
+[section]
 
-  # in your Perl script
-  use Config::INI::Simple;
+section-entry=lol
 
-  my $conf = new Config::INI::Simple;
+--------------- Code --------------
 
-  # Read the config file.
-  $conf->read ("settings.ini");
+#read ini
 
-  # Change the port from "Server02" block
-  $conf->{Server02}->{port} = 2236;
+my $ini = Config::INI::Simple->new("test.ini");
 
-  # Change the "server" to "Server02"
-  $conf->{default}->{server} = 'Server02';
+print $ini->{_}->{test}, "\n";
 
-  # Write the changes.
-  $conf->write ("settings.ini");
+print $ini->{section}->{"section-entry"}, "\n";
+
+
+#write ini
+
+$ini = Config::INI::Simple->new();
+
+$ini->{section1}->{key1} = "value1";
+
+$ini->{section1}->{key2} = "value2";
+
+$ini->write("test.ini");
 
 =head1 DESCRIPTION
 
-Config::INI::Simple is for very simplistic reading and writing of INI files. A new object must
-be created for each INI file (an object keeps all the data read in from an INI which is used
-on the write method to write to the INI). It also keeps all your comments and original order
-intact.
+Config::INI::Simple parses the .ini file at construction time and returns a hashref
+to the sections, which themselves are hashrefs to the sections' key value pairs.
 
-=head1 INI FILE FORMAT
+the top section, unless named is called "_" like in L<Config::INI::Reader>.
 
-A basic INI format is:
+if no path is passed to new(), and empty object is returned which can be used to
+construct an ini and then write() it to a specific file.
 
-  [Block1]
-  VAR1=Value1
-  VAR2=Value2
-  ...
 
-  [Block2]
-  VAR1=Value1
-  VAR2=Value2
-  ...
+=head1 RATIONAL
 
-Comments begin with either a ; or a # and must be on their own line. The object's hashref
-will contain the variables under their blocks. The default block is "default" (see B<new> for
-defaults). So, B<$conf->{Block2}->{VAR2} = Value2>
+L<Config::INI::Reader> depends on some uncommon packages, which themselves depend on other uncommon packages.
+Since my CPAN installer was somehow broken, I ended up installing its dozen of dependencies by hand.
+After wasting half an hour with manual package handling, i wrote my own little parser instead.
+This one only uses File::Slurp, which i consider a standard module.
 
-=head1 METHODS
-
-=head2 new
-
-Creates a new Config::INI::Simple object. You can pass in certain settings here:
-
-B<__file__> - Sets the file path of the INI file to read. If this value is set, then B<read>
-and B<write> won't need the FILE parameter.
-
-B<__default__> - Sets the name of the default block. Defaults to 'default'
-
-B<__eol__> - Set the end-of-line characters for writing an INI file. Defaults to Win32's \n
-
-B<__append__> - Set to true and new hash keys will be appended to the file upon writing. If a
-new block is added to the hashref, that block will be appended to the end of the file followed
-by its data. Defaults to 1.
-
-=head2 read (FILE)
-
-Read data from INI file B<FILE>. The object's hashref will contain this INI file's contents.
-
-=head2 write (FILE)
-
-Writes to the INI file B<FILE>, inputting all the hashref variables found in the object.
-
-=head2 reset
-
-Resets the internal hashref of the INI reader object. The four settings specified with B<new>
-will be reset to what they were when you created the object. All other data is removed from
-memory.
-
-=head1 CHANGES
-
-  Version 0.02
-  - Uploaded a version of the module that's been modified by some
-    other Perl hackers.
-
-  Version 0.01
-  - Initial release.
 
 =head1 AUTHOR
 
-C. J. Kirsle <kirsle -at- cuvou.net>
+Torsten Geyer
+
+=head1 SEE ALSO
+
+L<Config::INI::Reader>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2006 by C. J. Kirsle
+Copyright (C) 2011 by Torsten Geyer
 
 This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.8.7 or,
-at your option, any later version of Perl 5 you may have available.
-
+it under the same terms as Perl5 itself.
 
 =cut

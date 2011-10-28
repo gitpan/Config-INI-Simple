@@ -1,27 +1,14 @@
 Config-INI-Simple
 =================
 
+see the pod documentation in the modules .PM file or the generated docs for info.
+
 INSTALLATION
 
 To install this module type the following:
 
    perl Makefile.PL
    make
+   make test
    make install
-
-DEPENDENCIES
-
-This module requires these other modules and libraries:
-
-  strict
-  warnings
-
-COPYRIGHT AND LICENCE
-
-Copyright (C) 2006 C. J. Kirsle
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.8.7 or,
-at your option, any later version of Perl 5 you may have available.
-
 
